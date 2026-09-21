@@ -1,1 +1,302 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>لوحة الدراسة والحياة</title>
+<style>
+:root{--bg:#f8fafc;--card:#fff;--tx:#0f172a;--mut:#64748b;--bd:#e2e8f0;--pri:#6366f1;--ok:#10b981}
+:root[data-theme=dark]{--bg:#020617;--card:#0f172a;--tx:#f1f5f9;--mut:#94a3b8;--bd:#1e293b}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--bd);padding:8px 12px;z-index:5}
+.wrap{max-width:960px;margin:auto;padding:12px}
+h1{font-size:17px;margin:0 0 6px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1}
+button,select,input[type=text]{font:inherit;font-size:14px;padding:8px 12px;border-radius:12px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
+button{cursor:pointer}
+button.p{background:var(--pri);color:#fff;border-color:var(--pri)}
+button.on{background:var(--pri);color:#fff}
+input[type=text]{min-width:0;flex:1}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:12px;margin-bottom:12px}
+.mut{color:var(--mut);font-size:13px}
+.bar{height:8px;border-radius:99px;background:var(--bd);overflow:hidden;margin:4px 0}
+.bar i{display:block;height:100%;border-radius:99px;transition:width .3s}
+.sc{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:13px}
+th,td{padding:8px 6px;text-align:center;border-bottom:1px solid var(--bd)}
+th:first-child,td:first-child{text-align:start;position:sticky;inset-inline-start:0;background:var(--card);min-width:110px}
+td input[type=checkbox]{width:22px;height:22px}
+.today{color:var(--pri);font-weight:700}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-inline-end:6px}
+.x{border:0;background:none;color:var(--mut);padding:2px 6px}
+.big{font-size:56px;font-weight:700;text-align:center;font-variant-numeric:tabular-nums;direction:ltr}
+.cols{display:flex;align-items:flex-end;gap:6px;height:110px;direction:ltr}
+.cols div{flex:1;text-align:center;font-size:11px;display:flex;flex-direction:column;justify-content:flex-end;height:100%}
+.cols i{display:block;background:var(--pri);border-radius:6px 6px 0 0;min-height:2px}
+.tip{white-space:pre-wrap;line-height:1.8}
+@media print{header,.noprint{display:none}}
+</style>
+</head>
+<body>
+<header><div class="wrap" style="padding:0">
+  <div class="row"><h1 class="grow">🎓 لوحة الدراسة والحياة</h1>
+    <select id="wd" onchange="S.wd=+this.value;save();start=wkStart(new Date());render()"><option value="0">من الأحد</option><option value="1">من الإثنين</option></select>
+    <span id="sy" class="mut"></span><button onclick="toggleTheme()">🌓</button><button id="lo" onclick="logout()" style="display:none">خروج</button></div>
+  <div class="row" id="nav" style="margin-top:6px;overflow-x:auto;flex-wrap:nowrap"></div>
+</div></header>
+<div class="wrap" id="app"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const $=s=>document.querySelector(s);
+const DN=['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+const COL=['#6366f1','#10b981','#f59e0b','#ef4444','#06b6d4','#ec4899','#8b5cf6','#84cc16'];
+const PRE=['رياضيات','عربي','كيمياء','فيزياء','ممارسة الرياضة','بودكاست','وقت فراغ'];
+/* ===== ضع مفاتيح Supabase هنا ===== */
+const SB_URL='PASTE_PROJECT_URL_HERE';
+const SB_KEY='PASTE_ANON_OR_PUBLISHABLE_KEY_HERE';
+/* ================================== */
+const KEY='study_life_v1';
+const DEF=()=>({acts:[],done:{},tasks:[],focus:[],wd:0,theme:''});
+let S=null; try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
+S=Object.assign(DEF(),S||{});
+const saveLocal=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const save=()=>{saveLocal();queueSync()};
+const pad=n=>String(n).padStart(2,'0');
+const fmt=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const add=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+const day0=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate());
+const wkStart=d=>{d=day0(d);return add(d,-((d.getDay()-S.wd+7)%7))};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const bar=(p,c)=>`<div class="bar"><i style="width:${p}%;background:${c||'var(--pri)'}"></i></div>`;
+const isDone=(a,d)=>!!S.done[a.id+'|'+d];
+let tab='week', start=wkStart(new Date());
+
+/* ---------- الوضع الليلي ---------- */
+function applyTheme(){
+  const t=S.theme||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  document.documentElement.setAttribute('data-theme',t);
+}
+function toggleTheme(){S.theme=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';save();applyTheme()}
+
+/* ---------- الأنشطة والإنجازات ---------- */
+function addA(name){
+  const inp=$('#nm'); name=(name||(inp&&inp.value)||'').trim().slice(0,60); if(!name)return;
+  S.acts.push({id:Date.now(),name,color:COL[S.acts.length%COL.length]}); save(); render();
+}
+function delA(id){
+  if(!confirm('حذف هذا النشاط وكل سجلاته؟'))return;
+  S.acts=S.acts.filter(a=>a.id!==id);
+  Object.keys(S.done).forEach(k=>{if(k.startsWith(id+'|'))delete S.done[k]});
+  save(); render();
+}
+function tg(id,d){
+  const k=id+'|'+d; if(S.done[k])delete S.done[k]; else S.done[k]=1; save();
+  const sc=$('.sc'),x=sc?sc.scrollLeft:0; render(); const s2=$('.sc'); if(s2)s2.scrollLeft=x;
+}
+function nav(n){start=n===0?wkStart(new Date()):add(start,n);render()}
+
+function download(name,text,type){
+  const u=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);
+}
+function exportCsv(){
+  const ds=[...Array(7)].map((_,i)=>fmt(add(start,i)));
+  const rows=[['النشاط',...ds,'المنجز']];
+  S.acts.forEach(a=>rows.push([a.name,...ds.map(d=>isDone(a,d)?'✓':''),ds.filter(d=>isDone(a,d)).length+'/7']));
+  download('weekly-'+ds[0]+'.csv','\uFEFF'+rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n'),'text/csv');
+}
+function backup(){download('backup-'+fmt(new Date())+'.json',JSON.stringify(S),'application/json')}
+function restore(inp){
+  const f=inp.files[0]; if(!f)return; const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.acts))throw 0;S=d;save();applyTheme();render();alert('تمت الاستعادة ✅')}catch(e){alert('ملف غير صالح')}};
+  r.readAsText(f);
+}
+
+/* ---------- تبويب الأسبوع ---------- */
+function weekView(){
+  const days=[...Array(7)].map((_,i)=>add(start,i)),ds=days.map(fmt),td=fmt(new Date()),n=S.acts.length;
+  const cnt=a=>ds.filter(d=>isDone(a,d)).length, dc=d=>S.acts.filter(a=>isDone(a,d)).length;
+  const tot=ds.reduce((s,d)=>s+dc(d),0), pct=n?Math.round(tot*100/(n*7)):0;
+  let h=`<div class="card"><div class="row noprint"><button onclick="nav(-7)">→</button><button onclick="nav(0)">هذا الأسبوع</button><button onclick="nav(7)">←</button></div>
+  <div class="mut" style="margin:6px 0">${ds[0]} ← ${ds[6]}</div>${bar(pct,'var(--ok)')}<b>${pct}%</b> إنجاز الأسبوع</div>`;
+  if(!n) h+=`<div class="card mut">لا توجد أنشطة بعد. أضف أول مادة من الأسفل 👇</div>`;
+  else{
+    h+=`<div class="card sc"><table><thead><tr><th>النشاط</th>${days.map(d=>`<th class="${fmt(d)===td?'today':''}">${DN[d.getDay()]}<br><span class="mut">${d.getDate()}/${d.getMonth()+1}</span></th>`).join('')}<th>الأسبوع</th></tr></thead><tbody>`;
+    S.acts.forEach(a=>{
+      h+=`<tr><td><span class="dot" style="background:${a.color}"></span>${esc(a.name)} <button class="x noprint" onclick="delA(${a.id})">✕</button></td>`;
+      ds.forEach(d=>{h+=`<td><input type="checkbox" style="accent-color:${a.color}" ${isDone(a,d)?'checked':''} onchange="tg(${a.id},'${d}')"></td>`});
+      h+=`<td style="min-width:70px"><span class="mut">${cnt(a)}/7</span>${bar(Math.round(cnt(a)*100/7),a.color)}</td></tr>`;
+    });
+    h+=`<tr><td class="mut">إنجاز اليوم</td>${ds.map(d=>{const p=Math.round(dc(d)*100/n);return `<td class="mut">${p}%${bar(p)}</td>`}).join('')}<td></td></tr></tbody></table></div>`;
+  }
+  const miss=PRE.filter(p=>!S.acts.some(a=>a.name===p));
+  h+=`<div class="card noprint"><div class="row"><input type="text" id="nm" placeholder="أضف نشاطاً أو مادة (مثال: أحياء)" onkeydown="if(event.key==='Enter')addA()"><button class="p" onclick="addA()">إضافة</button></div>
+  <div class="row" style="margin-top:8px">${miss.map(p=>`<button onclick="addA('${p}')">+ ${p}</button>`).join('')}</div></div>
+  <div class="card noprint row"><button onclick="exportCsv()">⬇️ تقرير CSV</button><button onclick="window.print()">🖨️ طباعة / PDF</button><button onclick="backup()">💾 نسخة احتياطية</button>
+  <label class="mut">استعادة: <input type="file" accept=".json" onchange="restore(this)"></label></div>`;
+  return h;
+}
+
+/* ---------- تبويب اليوم: بومودورو + مهام ---------- */
+const MD={f:['تركيز',25],s:['استراحة قصيرة',5],l:['استراحة طويلة',15]};
+let P={m:'f',left:1500,end:0,iv:null};
+const mmss=s=>pad(Math.floor(s/60))+':'+pad(s%60);
+function beep(){try{const c=new AudioContext(),o=c.createOscillator();o.connect(c.destination);o.frequency.value=880;o.start();setTimeout(()=>{o.stop();c.close()},700)}catch(e){}}
+function pm(m){if(P.iv)return;P.m=m;P.left=MD[m][1]*60;render()}
+function ps(){
+  if(P.iv){clearInterval(P.iv);P.iv=null;render();return}
+  P.end=Date.now()+P.left*1000;P.iv=setInterval(tick,250);render();
+}
+function tick(){
+  P.left=Math.max(0,Math.round((P.end-Date.now())/1000));
+  const e=$('#tm'); if(e)e.textContent=mmss(P.left);
+  document.title=mmss(P.left)+' · '+MD[P.m][0];
+  if(P.left===0){
+    clearInterval(P.iv);P.iv=null;beep();
+    if(P.m==='f'){S.focus.push({t:fmt(new Date()),min:MD.f[1]});save()}
+    P.left=MD[P.m][1]*60;document.title='لوحة الدراسة والحياة';render();
+  }
+}
+function pr(){clearInterval(P.iv);P.iv=null;P.left=MD[P.m][1]*60;document.title='لوحة الدراسة والحياة';render()}
+function addT(){const i=$('#tt'),t=(i.value||'').trim().slice(0,200);if(!t)return;S.tasks.push({id:Date.now(),title:t,day:fmt(new Date()),done:false});save();render()}
+function tgT(id){const t=S.tasks.find(x=>x.id===id);if(t){t.done=!t.done;save();render()}}
+function delT(id){S.tasks=S.tasks.filter(x=>x.id!==id);save();render()}
+function todayView(){
+  const td=fmt(new Date()),ts=S.tasks.filter(t=>t.day===td);
+  const todayMin=S.focus.filter(f=>f.t===td).reduce((s,f)=>s+f.min,0);
+  return `<div class="card" style="text-align:center"><b>⏱️ بومودورو</b>
+  <div class="row" style="justify-content:center;margin:8px 0">${Object.entries(MD).map(([k,v])=>`<button class="${P.m===k?'on':''}" ${P.iv?'disabled':''} onclick="pm('${k}')">${v[0]}</button>`).join('')}</div>
+  <div class="big" id="tm">${mmss(P.left)}</div>
+  <div class="row" style="justify-content:center"><button class="p" onclick="ps()">${P.iv?'⏸ إيقاف مؤقت':'▶ ابدأ'}</button><button onclick="pr()">↺ إعادة</button></div>
+  <p class="mut">تركيز اليوم: ${todayMin} دقيقة</p></div>
+  <div class="card"><b>✅ مهام اليوم</b> <span class="mut">(${ts.filter(t=>t.done).length}/${ts.length})</span>
+  <div class="row" style="margin:8px 0"><input type="text" id="tt" placeholder="مهمة جديدة…" onkeydown="if(event.key==='Enter')addT()"><button class="p" onclick="addT()">+</button></div>
+  ${ts.map(t=>`<div class="row" style="padding:6px 0"><input type="checkbox" style="width:22px;height:22px" ${t.done?'checked':''} onchange="tgT(${t.id})"><span class="grow" style="${t.done?'text-decoration:line-through;opacity:.5':''}">${esc(t.title)}</span><button class="x" onclick="delT(${t.id})">✕</button></div>`).join('')||'<div class="mut">لا توجد مهام لليوم.</div>'}</div>`;
+}
+
+/* ---------- التحليلات ---------- */
+function stats(){
+  const n=S.acts.length,t=day0(new Date()),cur=wkStart(t),wk=[];
+  for(let i=7;i>=0;i--){
+    const s=add(cur,-7*i),el=Math.min(7,Math.round((t-s)/864e5)+1);let d=0;
+    for(let k=0;k<7;k++){const ds=fmt(add(s,k));d+=S.acts.filter(a=>S.done[a.id+'|'+ds]).length}
+    wk.push({l:fmt(s).slice(5),r:n&&el>0?Math.round(d*100/(n*el)):0});
+  }
+  const sl=Array(7).fill(0),dn=Array(7).fill(0);
+  for(let i=0;i<56;i++){const d=add(t,-i),w=d.getDay(),ds=fmt(d);sl[w]+=n;dn[w]+=S.acts.filter(a=>S.done[a.id+'|'+ds]).length}
+  const wdays=sl.map((s,i)=>({l:DN[i],r:s?Math.round(dn[i]*100/s):0}));
+  const acts=S.acts.map(a=>{
+    let c=0;for(let i=0;i<28;i++)if(isDone(a,fmt(add(t,-i))))c++;
+    let d=isDone(a,fmt(t))?t:add(t,-1),st=0;while(isDone(a,fmt(d))){st++;d=add(d,-1)}
+    return {...a,rate:Math.round(c*100/28),streak:st};
+  });
+  return {wk,wdays,acts};
+}
+const cols=(arr)=>`<div class="cols">${arr.map(x=>`<div><span>${x.r}%</span><i style="height:${x.r}%"></i><span class="mut">${x.l}</span></div>`).join('')}</div>`;
+function analyticsView(){
+  if(!S.acts.length)return `<div class="card mut">أضف أنشطة وابدأ التتبع لتظهر التحليلات هنا.</div>`;
+  const s=stats(),weak=[...s.acts].sort((a,b)=>a.rate-b.rate).slice(0,3),best=[...s.wdays].sort((a,b)=>b.r-a.r)[0];
+  const wkMin=S.focus.filter(f=>f.t>=fmt(add(new Date(),-6))).reduce((a,f)=>a+f.min,0);
+  return `<div class="card"><b>📈 الالتزام الأسبوعي (آخر 8 أسابيع)</b>${cols(s.wk)}</div>
+  <div class="card"><b>🗓️ الأيام الأكثر إنتاجية</b>${cols(s.wdays)}<div class="mut">أفضل يوم لك: <b>${best.l}</b> (${best.r}%)</div></div>
+  <div class="card"><b>🎯 المواد (آخر 28 يوماً)</b>${s.acts.map(a=>`<div style="margin-top:8px"><div class="row"><span class="grow">${esc(a.name)}</span><span class="mut">${a.rate}% · 🔥 ${a.streak} يوم</span></div>${bar(a.rate,a.color)}</div>`).join('')}</div>
+  <div class="card"><b>⚠️ تحتاج تركيزاً أكثر</b><ul>${weak.map(a=>`<li>${esc(a.name)} — ${a.rate}%</li>`).join('')}</ul>
+  <div class="mut">وقت التركيز آخر 7 أيام: ${Math.floor(wkMin/60)} س ${wkMin%60} د</div></div>`;
+}
+
+/* ---------- المدرّب (نصائح ذكية مبنية على أرقامك) ---------- */
+function coachView(){
+  if(!S.acts.length)return `<div class="card mut">أضف أنشطة أولاً ليعطيك المدرّب نصائح.</div>`;
+  const s=stats(),cur=s.wk[s.wk.length-1].r,prev=s.wk[s.wk.length-2].r;
+  const weak=[...s.acts].sort((a,b)=>a.rate-b.rate)[0],top=[...s.acts].sort((a,b)=>b.streak-a.streak)[0];
+  const best=[...s.wdays].sort((a,b)=>b.r-a.r)[0],worst=[...s.wdays].sort((a,b)=>a.r-b.r)[0];
+  let t=`نسبة إنجازك هذا الأسبوع: ${cur}% (الأسبوع الماضي: ${prev}%).\n\n`;
+  t+=cur>=80?'🌟 أداء ممتاز! حافظ على نفس الإيقاع ولا تنسَ الراحة.\n':cur>=50?'👍 أداء جيد، وبقليل من الالتزام تصل للتميز.\n':'💪 لا بأس، ابدأ صغيراً: اختر مهمتين فقط كل يوم والتزم بهما.\n';
+  t+=cur>prev?'📈 أنت أفضل من الأسبوع الماضي.\n':cur<prev?'📉 انخفض أداؤك قليلاً عن الأسبوع الماضي، راجع ما شغلك.\n':'';
+  t+=`\n• أضعف مادة لديك: «${weak.name}» (${weak.rate}%). خصّص لها جلسة بومودورو واحدة مبكراً كل يوم.\n`;
+  if(top.streak>1)t+=`• أطول سلسلة: «${top.name}» ${top.streak} أيام 🔥 لا تكسرها!\n`;
+  t+=`• أقوى أيامك ${best.l} (${best.r}%) فضع فيه أصعب المواد، وأضعفها ${worst.l} (${worst.r}%) فاجعله للمراجعة الخفيفة.\n`;
+  t+='• قاعدة عملية: ابدأ بأصعب مادة عندما يكون تركيزك أعلى، واجعل الهاتف بعيداً أثناء جلسة التركيز.';
+  return `<div class="card"><b>🤖 مدرّبك</b><div class="tip" style="margin-top:8px">${esc(t)}</div></div>
+  <div class="card mut">هذه نصائح تلقائية مبنية على أرقامك. الشرح الذكي للمواد يحتاج خادماً ومفتاح API (خطوة اختيارية لاحقاً).</div>`;
+}
+
+/* ---------- المزامنة السحابية (Supabase) ---------- */
+let sb=null,user=null,ready=false,chan=null,syncTimer=null,syncSt='';
+const CID=Math.random().toString(36).slice(2);
+if(window.supabase&&SB_URL.startsWith('http')){try{sb=supabase.createClient(SB_URL,SB_KEY)}catch(e){console.error(e)}}
+function setSync(s){syncSt=s;const e=$('#sy');if(e)e.textContent=s==='ok'?'☁️ تمت المزامنة':s==='pend'?'⏳ جارٍ الحفظ…':s==='err'?'⚠️ غير متصل (محفوظ على جهازك)':''}
+function queueSync(){
+  if(!sb||!user)return; setSync('pend'); clearTimeout(syncTimer); syncTimer=setTimeout(push,600);
+}
+async function push(){
+  if(!sb||!user)return; clearTimeout(syncTimer); syncTimer=null;
+  const {error}=await sb.from('user_data').upsert({user_id:user.id,data:S,client:CID,updated_at:new Date().toISOString()});
+  if(error){console.error(error);setSync('err');clearTimeout(syncTimer);syncTimer=setTimeout(push,5000)}else setSync('ok');
+}
+async function pull(){
+  const {data,error}=await sb.from('user_data').select('data').eq('user_id',user.id).maybeSingle();
+  if(error){console.error(error);setSync('err');return}
+  if(data&&data.data&&Array.isArray(data.data.acts)){S=Object.assign(DEF(),data.data);saveLocal();applyTheme();setSync('ok')}
+  else await push(); // حساب جديد: ارفع ما على جهازك
+  render();
+}
+function subscribe(){
+  if(chan){sb.removeChannel(chan);chan=null}
+  chan=sb.channel('ud-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:'user_data',filter:'user_id=eq.'+user.id},p=>{
+    const r=p.new; if(!r||!r.data||r.client===CID)return;
+    S=Object.assign(DEF(),r.data);saveLocal();applyTheme();render();setSync('ok');
+  }).subscribe();
+}
+async function onUser(u){
+  if(u&&user&&user.id===u.id)return;
+  user=u;ready=true;render();
+  if(u){await pull();subscribe()}
+}
+async function logout(){
+  clearTimeout(syncTimer);syncTimer=null;
+  if(chan){sb.removeChannel(chan);chan=null}
+  try{localStorage.removeItem(KEY)}catch(e){}
+  S=DEF();applyTheme();
+  try{await sb.auth.signOut()}catch(e){}
+  user=null;render();
+}
+function authView(){
+  return `<div class="card" style="max-width:380px;margin:24px auto"><b>🔐 تسجيل الدخول</b>
+  <p class="mut">بياناتك تُحفظ سحابياً وتظهر على أي جهاز بعد الدخول.</p>
+  <div style="display:grid;gap:8px"><input type="text" id="em" placeholder="البريد الإلكتروني" dir="ltr" autocomplete="email">
+  <input type="text" id="pw" placeholder="كلمة المرور (6 أحرف على الأقل)" dir="ltr" autocomplete="current-password" onkeydown="if(event.key==='Enter')authGo('in')">
+  <button class="p" onclick="authGo('in')">دخول</button><button onclick="authGo('up')">إنشاء حساب جديد</button></div>
+  <p class="mut" id="am"></p></div>`;
+}
+async function authGo(mode){
+  const email=$('#em').value.trim(),password=$('#pw').value,m=$('#am');
+  if(!email||!password){m.textContent='أدخل البريد وكلمة المرور';return}
+  m.textContent='…';
+  const r=mode==='up'?await sb.auth.signUp({email,password}):await sb.auth.signInWithPassword({email,password});
+  if(r.error){m.textContent=r.error.message;return}
+  if(mode==='up'&&!r.data.session)m.textContent='تم إنشاء الحساب. افتح بريدك وأكّد الرابط ثم سجّل الدخول.';
+}
+if(sb){sb.auth.onAuthStateChange((ev,session)=>{const u=session?session.user:null;setTimeout(()=>onUser(u),0)})}
+addEventListener('online',()=>{if(sb&&user)push()});
+addEventListener('visibilitychange',()=>{if(document.hidden&&syncTimer)push()});
+
+/* ---------- الرسم ---------- */
+const TABS=[['week','📅 الأسبوع'],['today','⏱️ اليوم'],['an','📊 التحليلات'],['coach','🤖 المدرّب']];
+function render(){
+  $('#lo').style.display=sb&&user?'':'none';
+  setSync(sb&&user?syncSt:'');
+  if(sb&&!ready){$('#nav').innerHTML='';$('#app').innerHTML='<div class="card mut">جارٍ التحميل…</div>';return}
+  if(sb&&!user){$('#nav').innerHTML='';$('#app').innerHTML=authView();return}
+  $('#wd').value=S.wd;
+  $('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${tab===k?'on':''}" style="white-space:nowrap" onclick="tab='${k}';render()">${l}</button>`).join('');
+  const warn=sb?'':'<div class="card mut">⚠️ لم تُضبط مفاتيح Supabase بعد: البيانات تُحفظ على هذا الجهاز فقط.</div>';
+  $('#app').innerHTML=warn+(tab==='week'?weekView():tab==='today'?todayView():tab==='an'?analyticsView():coachView());
+}
+applyTheme();render();
+</script>
+</body>
+  </html>
